@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📨 共享通讯板 · GitHub存储</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: system-ui, sans-serif;
+            background: #f5f7fc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 16px;
+        }
+        .card {
+            max-width: 720px;
+            width: 100%;
+            background: white;
+            border-radius: 32px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.06);
+            padding: 24px 20px 32px;
+        }
+        h1 { font-size: 1.9rem; font-weight: 600; color: #0b1b32; margin-bottom: 4px; }
+        .sub { color: #5e6f8d; font-size: 0.95rem; border-left: 3px solid #8a9bb8; padding-left: 12px; margin-bottom: 24px; }
+        .msg-area {
+            background: #f2f5fe;
+            border-radius: 24px;
+            padding: 16px 12px;
+            max-height: 340px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            border: 1px solid #e6ecf9;
+            min-height: 80px;
+        }
+        .msg-area:empty::before {
+            content: "📭 暂无消息";
+            color: #8a9bb8;
+            display: block;
+            text-align: center;
+            padding: 28px 0;
+        }
+        .msg-item {
+            background: white;
+            padding: 12px 16px;
+            border-radius: 20px;
+            margin-bottom: 10px;
+            border: 1px solid #e9eefa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            animation: fade 0.2s ease;
+        }
+        .msg-item .content { flex: 1; color: #14273e; font-size: 1rem; word-break: break-all; }
+        .msg-item .time { font-size: 0.7rem; color: #7a8aa5; background: #f0f4fe; padding: 4px 10px; border-radius: 40px; white-space: nowrap; }
+        .delete-btn {
+            background: none; border: none; color: #b0bedb; font-size: 1.2rem;
+            cursor: pointer; padding: 4px 8px; border-radius: 40px;
+            transition: 0.15s;
+        }
+        .delete-btn:hover { color: #d14c4c; background: #fee9e9; }
+        .input-row { display: flex; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+        .input-row input {
+            flex: 2; min-width: 180px; padding: 14px 18px;
+            border: 1px solid #d9e1f0; border-radius: 60px; font-size: 1rem;
+            outline: none;
+        }
+        .input-row input:focus { border-color: #4f7df3; box-shadow: 0 0 0 3px rgba(79,125,243,0.15); }
+        .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn {
+            padding: 14px 22px; border: none; border-radius: 60px;
+            font-weight: 500; font-size: 0.95rem;
+            background: #eef3fc; color: #1f334f; cursor: pointer;
+            transition: 0.15s;
+        }
+        .btn-primary { background: #1f3c6b; color: white; }
+        .btn-primary:hover { background: #142b4f; }
+        .btn-outline { background: transparent; border: 1px solid #d0dae9; }
+        .btn-outline:hover { background: #e9effa; }
+        .btn-danger { background: #fce8e8; color: #b13e3e; }
+        .btn-danger:hover { background: #fad4d4; }
+        .footer-actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-top: 16px; gap: 12px; }
+        .status-badge { font-size: 0.8rem; background: #e2e9f9; padding: 4px 12px; border-radius: 40px; color: #2d4a77; }
+        .test-hint { margin-top: 12px; font-size: 0.85rem; color: #50638b; background: #f0f5ff; padding: 8px 16px; border-radius: 60px; display: inline-block; }
+        @keyframes fade { from { opacity: 0.4; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .loading { opacity: 0.6; pointer-events: none; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>📨 共享通讯板</h1>
+    <div class="sub">数据存于 GitHub · 所有人可见</div>
+
+    <div id="messageContainer" class="msg-area"></div>
+
+    <div class="input-row">
+        <input type="text" id="messageInput" placeholder="输入新消息..." autocomplete="off">
+        <div class="btn-group">
+            <button class="btn btn-primary" id="sendBtn">📤 发送</button>
+            <button class="btn btn-outline" id="refreshBtn">⟳ 刷新</button>
+        </div>
+    </div>
+
+    <div class="footer-actions">
+        <button class="btn btn-danger" id="clearAllBtn">🗑️ 清空全部</button>
+        <span class="status-badge" id="statusBadge">🔄 加载中...</span>
+    </div>
+
+    <div class="test-hint">
+        ⚡ 所有数据存储在 GitHub 仓库的 messages.txt 中
+    </div>
+</div>
+
+<script>
+    // ========================================
+    //  ⚠️ 请修改以下配置！
+    // ========================================
+    const GITHUB_TOKEN = 'ghp_xxxxxxxxxxxxxxxxxxxx';  // 你的 Token
+    const REPO_OWNER = '你的用户名';
+    const REPO_NAME = '你的仓库名';
+    const FILE_PATH = 'messages.txt';
+    // ========================================
+
+    const API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${FILE_PATH}`;
+    const container = document.getElementById('messageContainer');
+    const inputField = document.getElementById('messageInput');
+    const statusBadge = document.getElementById('statusBadge');
+
+    // 获取文件 SHA（更新时需要）
+    async function getFileSha() {
+        try {
+            const res = await fetch(API_URL, {
+                headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+            });
+            if (res.status === 404) return null;
+            const data = await res.json();
+            return data.sha;
+        } catch {
+            return null;
+        }
+    }
+
+    // 读取消息
+    async function getMessages() {
+        try {
+            const res = await fetch(API_URL, {
+                headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+            });
+            if (res.status === 404) return [];
+            const data = await res.json();
+            const content = atob(data.content);
+            if (!content.trim()) return [];
+            return JSON.parse(content);
+        } catch {
+            return [];
+        }
+    }
+
+    // 保存消息到 GitHub
+    async function saveMessages(messages) {
+        const sha = await getFileSha();
+        const content = btoa(unescape(encodeURIComponent(JSON.stringify(messages, null, 2))));
+        
+        const body = {
+            message: '更新消息',
+            content: content,
+            sha: sha
+        };
+
+        const res = await fetch(API_URL, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `token ${GITHUB_TOKEN}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+
+        if (!res.ok) throw new Error('保存失败');
+    }
+
+    // 渲染消息
+    async function renderMessages() {
+        try {
+            statusBadge.textContent = '🔄 加载中...';
+            const messages = await getMessages();
+            
+            if (messages.length === 0) {
+                container.innerHTML = '';
+                statusBadge.textContent = '💾 0 条消息';
+                return;
+            }
+
+            const sorted = [...messages].sort((a, b) => a.timestamp - b.timestamp);
+            const html = sorted.map((msg, index) => {
+                const time = new Date(msg.timestamp).toLocaleString('zh');
+                return `
+                    <div class="msg-item" data-index="${index}">
+                        <span class="content">${escapeHtml(msg.content)}</span>
+                        <span class="time">${time}</span>
+                        <button class="delete-btn" data-index="${index}">✕</button>
+                    </div>
+                `;
+            }).join('');
+            container.innerHTML = html;
+            statusBadge.textContent = `💾 ${messages.length} 条消息`;
+
+            // 删除按钮
+            container.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', async function() {
+                    const index = parseInt(this.dataset.index);
+                    await deleteMessage(index);
+                });
+            });
+        } catch (error) {
+            statusBadge.textContent = '❌ 加载失败';
+            console.error(error);
+        }
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // 发送消息
+    async function sendMessage() {
+        const content = inputField.value.trim();
+        if (!content) {
+            alert('请输入消息内容');
+            return;
+        }
+
+        try {
+            const messages = await getMessages();
+            messages.push({
+                content: content,
+                timestamp: Date.now()
+            });
+            await saveMessages(messages);
+            inputField.value = '';
+            await renderMessages();
+        } catch (error) {
+            alert('发送失败：' + error.message);
+        }
+    }
+
+    // 删除消息
+    async function deleteMessage(index) {
+        try {
+            const messages = await getMessages();
+            const msg = messages[index];
+            if (!msg) return;
+            
+            if (!confirm(`删除消息：“${msg.content.length > 20 ? msg.content.slice(0,20) + '…' : msg.content}”`)) return;
+            
+            messages.splice(index, 1);
+            await saveMessages(messages);
+            await renderMessages();
+        } catch (error) {
+            alert('删除失败：' + error.message);
+        }
+    }
+
+    // 清空全部
+    async function clearAll() {
+        if (!confirm('⚠️ 确定要删除所有消息吗？')) return;
+        try {
+            await saveMessages([]);
+            await renderMessages();
+        } catch (error) {
+            alert('清空失败：' + error.message);
+        }
+    }
+
+    // 事件绑定
+    document.getElementById('sendBtn').addEventListener('click', sendMessage);
+    document.getElementById('refreshBtn').addEventListener('click', renderMessages);
+    document.getElementById('clearAllBtn').addEventListener('click', clearAll);
+    inputField.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    // 初始化
+    renderMessages();
+</script>
+</body>
+</html>
